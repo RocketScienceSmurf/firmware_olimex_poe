@@ -69,10 +69,12 @@ void PhoneAPI::handleStartConfig()
         state = STATE_SEND_MY_INFO;
     }
     pauseBluetoothLogging = true;
+#if !MESHTASTIC_EXCLUDE_WEBSERVER
     spiLock->lock();
     filesManifest = getFiles("/", 10);
     spiLock->unlock();
     LOG_DEBUG("Got %d files in manifest", filesManifest.size());
+#endif
 
     LOG_INFO("Start API client config millis=%u", millis());
     // Protect against concurrent BLE callbacks: they run in NimBLE's FreeRTOS task and also touch nodeInfoQueue.

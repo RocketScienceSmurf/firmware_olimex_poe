@@ -198,6 +198,17 @@ NodeDB::NodeDB()
     loadFromDisk();
     cleanupMeshDB();
 
+#if MESHTASTIC_EXCLUDE_GPS
+    // PositionModule is not compiled; restore localPosition from stored self node if fixed_position is set.
+    if (config.position.fixed_position) {
+        meshtastic_NodeInfoLite *selfNode = getMeshNode(myNodeInfo.my_node_num);
+        if (selfNode && selfNode->has_position) {
+            setLocalPosition(TypeConversions::ConvertToPosition(selfNode->position));
+            LOG_INFO("Restored fixed position from storage: lat=%d lon=%d", localPosition.latitude_i, localPosition.longitude_i);
+        }
+    }
+#endif
+
     uint32_t devicestateCRC = crc32Buffer(&devicestate, sizeof(devicestate));
     uint32_t nodeDatabaseCRC = crc32Buffer(&nodeDatabase, sizeof(nodeDatabase));
     uint32_t configCRC = crc32Buffer(&config, sizeof(config));

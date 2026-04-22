@@ -1,4 +1,7 @@
 #include "mesh/eth/ethClient.h"
+
+#if !defined(USE_LAN8720)
+
 #include "NodeDB.h"
 #include "RTC.h"
 #include "concurrency/Periodic.h"
@@ -197,4 +200,6 @@ bool isEthernetAvailable()
     }
 }
 
-#endif
+#endif // HAS_NETWORKING
+
+#endif // !USE_LAN8720

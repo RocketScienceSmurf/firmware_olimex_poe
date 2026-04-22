@@ -29,6 +29,11 @@
 #include "mqtt/MQTT.h"
 #endif
 
+#if HAS_ETHERNET && defined(USE_LAN8720)
+#include "mesh/eth/lan8720Client.h"
+#include <ETH.h>
+#endif
+
 #if !MESHTASTIC_EXCLUDE_GPS
 #include "GPS.h"
 #endif
@@ -1268,7 +1273,7 @@ void AdminModule::handleGetDeviceConnectionStatus(const meshtastic_MeshPacket &r
     }
 #endif
 
-#if HAS_ETHERNET && !defined(USE_WS5500)
+#if HAS_ETHERNET && !defined(USE_WS5500) && !defined(USE_LAN8720)
     conn.has_ethernet = true;
     conn.ethernet.has_status = true;
     if (Ethernet.linkStatus() == LinkON) {
@@ -1280,6 +1285,17 @@ void AdminModule::handleGetDeviceConnectionStatus(const meshtastic_MeshPacket &r
         conn.ethernet.status.is_syslog_connected = false; // FIXME wire this up
     } else {
         conn.ethernet.status.is_connected = false;
+    }
+#elif HAS_ETHERNET && defined(USE_LAN8720)
+    conn.has_ethernet = true;
+    conn.ethernet.has_status = true;
+    conn.ethernet.status.is_connected = isEthernetAvailable();
+    if (conn.ethernet.status.is_connected) {
+        conn.ethernet.status.ip_address = ETH.localIP();
+#if !MESHTASTIC_EXCLUDE_MQTT
+        conn.ethernet.status.is_mqtt_connected = mqtt && mqtt->isConnectedDirectly();
+#endif
+        conn.ethernet.status.is_syslog_connected = false;
     }
 #endif
 

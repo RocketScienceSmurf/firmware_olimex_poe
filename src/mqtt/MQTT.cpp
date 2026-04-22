@@ -23,6 +23,10 @@
 #include <ETHClass2.h>
 #define ETH ETH2
 #endif // HAS_ETHERNET
+#if HAS_ETHERNET && defined(USE_LAN8720)
+#include <ETH.h>
+#include <fcntl.h>
+#endif
 #include "Default.h"
 #if !defined(ARCH_NRF52) || NRF52_USE_JSON
 #include "serialization/JSON.h"
@@ -40,6 +44,9 @@
 #define ntohl __ntohl
 #endif
 #include <RTC.h>
+#if defined(MQTT_HAS_CA_CERT)
+#include "mqtt_ca_cert.h"
+#endif
 
 MQTT *mqtt;
 
@@ -316,17 +323,21 @@ struct PubSubConfig {
 #if HAS_NETWORKING
 bool connectPubSub(const PubSubConfig &config, PubSubClient &pubSub, Client &client)
 {
-    pubSub.setBufferSize(1024, 1024);
     pubSub.setClient(client);
     pubSub.setServer(config.serverAddr.c_str(), config.serverPort);
 
     LOG_INFO("Connecting directly to MQTT server %s, port: %d, username: %s, password: %s", config.serverAddr.c_str(),
              config.serverPort, config.mqttUsername, config.mqttPassword);
+    LOG_INFO("Heap before connect: free=%d largest_block=%d", heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
     // Generate node ID from nodenum for client identification
     std::string nodeId = nodeDB->getNodeId();
     const bool connected = pubSub.connect(nodeId.c_str(), config.mqttUsername, config.mqttPassword);
     if (connected) {
+        // Resize PubSub buffers only after TLS handshake completes — allocating before would consume
+        // contiguous heap that mbedTLS needs for its 2×16 KB SSL record buffers.
+        pubSub.setBufferSize(1024, 1024);
         isConnected = true;
         LOG_INFO("MQTT connected");
     } else {
@@ -344,7 +355,9 @@ inline bool isConnectedToNetwork()
         return true;
 #endif
 
-#if HAS_WIFI
+#if defined(USE_LAN8720)
+    return ETH.linkUp();
+#elif HAS_WIFI
     return WiFi.isConnected();
 #elif HAS_ETHERNET
     return Ethernet.linkStatus() == LinkON;
@@ -537,14 +550,46 @@ void MQTT::reconnect()
         MQTTClient *clientConnection = mqttClient.get();
 #if MQTT_SUPPORTS_TLS
         if (moduleConfig.mqtt.tls_enabled) {
+            // Certificate validation requires a correct clock; defer until NTP has synced.
+            if (getRTCQuality() < RTCQualityFromNet) {
+                LOG_INFO("Deferring MQTT TLS: waiting for NTP sync (RTC quality=%d)", getRTCQuality());
+                return;
+            }
+            const size_t tlsMinHeap = 45000;
+            size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+            LOG_INFO("Heap before TLS: free=%d largest_block=%d", heap_caps_get_free_size(MALLOC_CAP_8BIT), largestBlock);
+            if (largestBlock < tlsMinHeap) {
+                LOG_WARN("Deferring MQTT TLS: insufficient heap (need %d, have %d)", tlsMinHeap, largestBlock);
+                return;
+            }
+#if defined(MQTT_HAS_CA_CERT)
+            mqttClientTLS.setCACert(MQTT_TLS_CA_CERT);
+            LOG_INFO("Use TLS-encrypted session with CA cert verification");
+#else
             mqttClientTLS.setInsecure();
             LOG_INFO("Use TLS-encrypted session");
+#endif
+            mqttClientTLS.setTimeout(10); // 10s socket I/O timeout — prevents blocking write() from freezing main loop
             clientConnection = &mqttClientTLS;
         } else {
             LOG_INFO("Use non-TLS-encrypted session");
         }
 #endif
         if (connectPubSub(ps_config, pubSub, *clientConnection)) {
+#if MQTT_SUPPORTS_TLS
+            if (moduleConfig.mqtt.tls_enabled) {
+                // Make the SSL socket non-blocking so data_to_read() / available() returns
+                // immediately when no incoming data is waiting. Without this, mbedtls_ssl_read()
+                // blocks indefinitely in recv() and freezes the main loop.
+                // send_ssl_data() already has its own socket_timeout retry loop for writes.
+                int fd = mqttClientTLS.fd();
+                if (fd >= 0) {
+                    int flags = fcntl(fd, F_GETFL, 0);
+                    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+                    LOG_DEBUG("MQTT TLS socket set to non-blocking (fd=%d)", fd);
+                }
+            }
+#endif
             enabled = true; // Start running background process again
             runASAP = true;
             reconnectCount = 0;
@@ -558,7 +603,8 @@ void MQTT::reconnect()
             LOG_ERROR("Failed to contact MQTT server directly (%d/%d)", reconnectCount, reconnectMax);
             if (reconnectCount >= reconnectMax) {
                 needReconnect = true;
-                wifiReconnect->setIntervalFromNow(0);
+                if (wifiReconnect)
+                    wifiReconnect->setIntervalFromNow(0);
                 reconnectCount = 0;
             }
 #endif
@@ -623,8 +669,15 @@ int32_t MQTT::runOnce()
             if (isConnectedDirectly()) {
                 publishQueuedMessages();
                 return 200;
-            } else
+            } else {
+#if MQTT_SUPPORTS_TLS
+                // If TLS is enabled but NTP hasn't synced yet, retry quickly so the TLS
+                // attempt fires before other connections consume heap.
+                if (moduleConfig.mqtt.tls_enabled && getRTCQuality() < RTCQualityFromNet)
+                    return 2000;
+#endif
                 return 30000;
+            }
         }
     } else {
         // we are connected to server, check often for new requests on the TCP port

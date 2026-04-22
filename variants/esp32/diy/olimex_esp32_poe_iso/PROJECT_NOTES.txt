@@ -1,0 +1,210 @@
+================================================================================
+  Olimex ESP32-POE-ISO + MOD-LoRa868/915 — Meshtastic Firmware Variant
+  Project Notes
+  Last updated: 2026-04-12
+================================================================================
+
+OVERVIEW
+--------
+Custom Meshtastic firmware variant for the Olimex ESP32-POE-ISO board combined
+with the Olimex MOD-LoRa868 (or MOD-LoRa915) LoRa module. The MOD-LoRa plugs
+directly into the UEXT connector on the ESP32-POE-ISO.
+
+Additionally, LAN8720 RMII Ethernet support was added to the Meshtastic firmware
+as a new code path (USE_LAN8720), since LAN8720 was not previously supported
+(only W5500 SPI and RAK W5100S were).
+
+Hardware used during development:
+  - Olimex ESP32-POE-ISO  (ESP32-D0WD-V3 rev 3.1, MAC: 34:5f:45:37:c3:74)
+  - Olimex MOD-LoRa868    (SX1276 chip)
+  - Serial port: /dev/ttyUSB0 at 115200 baud
+
+
+BUILD STATUS
+------------
+  Firmware builds successfully: YES
+  Flash size used: 83.3% (2,019,717 / 2,424,832 bytes)
+  RAM used: 34.9% (114,476 / 327,680 bytes)
+  Build command:
+    cd /home/mikael/firmware
+    ~/.platformio/penv/bin/pio run -e olimex-esp32-poe-iso
+
+  Flash command:
+    cd /home/mikael/firmware
+    ~/.platformio/penv/bin/pio run -e olimex-esp32-poe-iso --target upload --upload-port /dev/ttyUSB0
+
+  NOTE: Use ~/.platformio/penv/bin/pio, NOT /usr/bin/pio (system pio is outdated).
+
+
+VARIANT FILES (new files created for this board)
+------------------------------------------------
+  variants/esp32/diy/olimex_esp32_poe_iso/platformio.ini   -- PlatformIO env definition
+  variants/esp32/diy/olimex_esp32_poe_iso/variant.h        -- Pin definitions
+  variants/esp32/diy/olimex_esp32_poe_iso/PROJECT_NOTES.txt -- this file
+
+
+LAN8720 ETHERNET SUPPORT (new code added to firmware)
+------------------------------------------------------
+  These files were created/modified to add USE_LAN8720 as a third Ethernet path
+  alongside the existing USE_WS5500 (SPI W5500) and RAK W5100S paths.
+
+  NEW files:
+    src/mesh/eth/lan8720Client.h       -- declares initEthernet() / isEthernetAvailable()
+    src/mesh/eth/lan8720Client.cpp     -- ETH.begin(), event handler, NTP, mDNS, syslog, API
+    src/mesh/api/lan8720ServerAPI.h    -- WiFiClient/WiFiServer server API (no-WiFi platforms)
+    src/mesh/api/lan8720ServerAPI.cpp  -- initApiServer() for no-WiFi platforms
+
+  MODIFIED files (all changes guarded with #if defined(USE_LAN8720)):
+    src/DebugConfiguration.h           -- added #include <ETH.h> for USE_LAN8720
+    src/main.cpp                       -- added include block for lan8720Client.h
+    src/mesh/InterfacesTemplates.cpp   -- template instantiation for WiFiClient/WiFiServer
+    src/mqtt/MQTT.h                    -- excluded EthernetClient.h when USE_LAN8720
+    src/mqtt/MQTT.cpp                  -- added ETH.h include + ETH.linkUp() to isConnectedToNetwork()
+    src/modules/AdminModule.cpp        -- added LAN8720 status block using ETH.linkUp()/ETH.localIP()
+    src/mesh/udp/UdpMulticastHandler.h -- added ETH.h include
+    src/Power.cpp                      -- added ETH.h include
+    src/mesh/api/ethServerAPI.h        -- excluded RAK header when USE_LAN8720
+    src/mesh/api/ethServerAPI.cpp      -- excluded RAK implementation when USE_LAN8720
+
+  KEY DESIGN DECISION:
+    On ESP32, HAS_WIFI=1 is always set by src/platform/esp32/architecture.h.
+    This means the WiFiAPClient.cpp infrastructure (WiFiEvent, initWifi, etc.) is always
+    compiled in. The LAN8720 ETHEvent handler in lan8720Client.cpp registers via
+    WiFi.onEvent() and reuses the same lwIP stack. The WiFiServerAPI (WiFiClient/WiFiServer)
+    is reused for the TCP API server — no separate lan8720ServerAPI is needed on ESP32.
+
+  ENABLING ETHERNET AT RUNTIME:
+    Ethernet is disabled by default in Meshtastic config. To enable:
+      meshtastic --set network.eth_enabled true
+    or via the Meshtastic phone app: Settings -> Network -> Ethernet -> Enable
+
+  IMPORTANT - src/mesh/eth/ is excluded by default in esp32-common.ini:
+    build_src_filter = ... -<mesh/eth/>
+    The variant's platformio.ini adds lan8720Client.cpp back explicitly:
+      build_src_filter = ${esp32_base.build_src_filter} +<mesh/eth/lan8720Client.cpp>
+
+
+PIN MAPPING (UEXT connector)
+-----------------------------
+  ESP32-POE-ISO UEXT pin -> GPIO -> SX1276 signal
+
+  UEXT  1  3.3V   -> MOD-LoRa VCC
+  UEXT  2  GND    -> MOD-LoRa GND
+  UEXT  3  GPIO4  -> SX1276 DIO0  (primary IRQ: RxDone/TxDone/CadDone)
+  UEXT  4  GPIO36 -> SX1276 DIO1  (RxTimeout; GPIO36 is input-only on ESP32)
+  UEXT  5  GPIO16 -> SX1276 RESET (active low)
+  UEXT  6  GPIO13 -> SX1276 DIO2  (FhssChangeChannel; unused in LoRa mode)
+  UEXT  7  GPIO15 -> SX1276 MISO
+  UEXT  8  GPIO2  -> SX1276 MOSI
+  UEXT  9  GPIO14 -> SX1276 SCK
+  UEXT 10  GPIO5  -> SX1276 NSS (CS)
+
+  IMPORTANT: The MOD-LoRa module remaps the UEXT UART/I2C pins (3-6) to SX1276
+  signals. This means I2C (GPIO16=SCL, GPIO13=SDA) is unavailable when the
+  MOD-LoRa is plugged in. HAS_WIRE=0 is set in variant.h.
+
+  CONNECTOR ORIENTATION: Pin 1 is marked with a dot/triangle on both PCB silkscreens.
+  A reversed connection will apply power to signal pins and likely damage hardware.
+
+LAN8720 GPIO RESERVATIONS (do not use these for other purposes)
+---------------------------------------------------------------
+  GPIO0  -- ETH_CLK input (or ref clock alt mode)
+  GPIO12 -- LAN8720 nRST / power enable (ETH_PHY_POWER)
+  GPIO17 -- 50MHz ref clock output from ESP32 to LAN8720 (ETH_CLOCK_GPIO17_OUT)
+  GPIO18 -- LAN8720 MDIO
+  GPIO19 -- EMAC_TXD0
+  GPIO21 -- EMAC_TX_EN
+  GPIO22 -- EMAC_TXD1
+  GPIO23 -- LAN8720 MDC
+  GPIO25 -- EMAC_RXD0
+  GPIO26 -- EMAC_RXD1
+  GPIO27 -- EMAC_CRS_DV
+
+  ETH.begin() parameters (from pins_arduino.h for esp32-poe-iso board):
+    ETH.begin(0, 12, 23, 18, ETH_PHY_LAN8720, ETH_CLOCK_GPIO17_OUT)
+    // (phy_addr, power_pin, mdc, mdio, phy_type, clk_mode)
+
+
+CURRENT STATUS
+--------------
+  FULLY WORKING as of 2026-04-18:
+  - LoRa (SX1276 / RF95): working, EU_868 region, LongFast, 869.525 MHz
+  - LAN8720 Ethernet: working, DHCP, 100 Mbps full-duplex, ping confirmed
+  - Meshtastic app (mobile) connected via Ethernet TCP API: confirmed
+  - Bluetooth (NimBLE): working
+  - No outstanding issues
+
+RESOLVED ISSUES (for reference)
+---------------------------------
+1. RF95 init result -2 (ERR_CHIP_NOT_FOUND)
+   - Root cause: defective/loose first MOD-LoRa868 module
+   - Fix: replaced with a new MOD-LoRa868 module -- now works
+
+2. I2C scanner noise -- Wire.cpp "could not acquire lock" at boot
+   - Root cause: keyboard scanner runs despite HAS_WIRE=0
+   - Fix: MESHTASTIC_EXCLUDE_I2C=1 in platformio.ini
+   - Additional upstream bugs found and fixed (power.h, InputBroker.cpp,
+     AdminModule.cpp, Power.cpp all had missing !MESHTASTIC_EXCLUDE_I2C guards)
+
+3. Ethernet "disabled in config" at boot
+   - Root cause: network.eth_enabled defaults to false in saved prefs
+   - Fix: initEthernet() in lan8720Client.cpp now forces eth_enabled=true
+     unconditionally, so no manual config step is needed
+
+4. Crash (Guru Meditation / LoadProhibited) on Ethernet connect
+   - Root cause: initWebServer() called with null SSL cert because
+     createSSLCert() is gated on isWifiAvailable() (returns false here)
+   - Fix: MESHTASTIC_EXCLUDE_WEBSERVER=1 in platformio.ini
+     (web UI not needed on this headless node; BLE/app config still works)
+
+DESIGN DECISIONS
+----------------
+  - wifi_enabled is forced to false in initEthernet() -- WiFi cannot be
+    accidentally enabled via the app on this board
+  - eth_enabled is forced to true in initEthernet() -- always-on Ethernet
+  - Web server excluded (MESHTASTIC_EXCLUDE_WEBSERVER=1) -- no SSL cert
+    dependency; configure via Meshtastic phone app over BLE instead
+
+
+REFERENCES
+----------
+  ESP32-POE-ISO product page:
+    https://www.olimex.com/Products/IoT/ESP32/ESP32-POE-ISO/
+
+  MOD-LoRa868 product page:
+    https://www.olimex.com/Products/IoT/LoRa/MOD-LoRa868/open-source-hardware
+
+  MOD-LoRa868 KiCad schematic (used to verify UEXT pin remapping):
+    https://github.com/OLIMEX/LoRa-868-915/blob/main/HARDWARE/MOD-LoRa-Rev-B/MOD-LoRa_RevB.pdf
+
+  LAN8720A datasheet:
+    https://ww1.microchip.com/downloads/en/devicedoc/00002165b.pdf
+
+  ETH.begin() API reference (Arduino-ESP32 v2.x):
+    ETH.begin(phy_addr, power, mdc, mdio, type, clk_mode)
+    -- phy_addr:  PHY SMI address (0 on ESP32-POE-ISO, PHYAD0 pulled low)
+    -- power:     GPIO for LAN8720 nRST/enable (12 on ESP32-POE-ISO)
+    -- mdc:       GPIO23
+    -- mdio:      GPIO18
+    -- type:      ETH_PHY_LAN8720
+    -- clk_mode:  ETH_CLOCK_GPIO17_OUT
+
+  Meshtastic firmware repo:
+    https://github.com/meshtastic/firmware
+
+  PlatformIO board definition:
+    ~/.platformio/platforms/espressif32/boards/esp32-poe-iso.json
+    ~/.platformio/packages/framework-arduinoespressif32/variants/esp32-poe-iso/pins_arduino.h
+
+
+NOTES ON FIRMWARE ARCHITECTURE
+-------------------------------
+  - HW model is DIY_V1 (id=39) -- no dedicated HW model enum exists for this board
+  - The variant is board_level=extra, meaning it won't appear in default device lists
+  - On ESP32, HAS_WIFI=1 is always true (set in src/platform/esp32/architecture.h)
+    even though WiFi is not used on this board. This is expected behavior.
+  - The "Not using WIFI" message at boot is normal and expected
+  - Bluetooth is enabled by default and works (NimBLE stack)
+  - eth_enabled and wifi_enabled are overridden at runtime in initEthernet()
+    regardless of what is stored in /prefs/config.proto
+================================================================================

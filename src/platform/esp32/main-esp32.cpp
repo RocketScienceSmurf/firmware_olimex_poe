@@ -6,6 +6,7 @@
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !MESHTASTIC_EXCLUDE_BLUETOOTH
 #include "nimble/NimbleBluetooth.h"
+#include <esp_bt.h>
 #endif
 
 #include <MeshtasticOTA.h>
@@ -41,6 +42,13 @@ void setBluetoothEnable(bool enable)
 #endif
     {
         if (!nimbleBluetooth) {
+            // Release classic BT memory — NimBLE uses BLE only.
+            // Must be called before esp_bt_controller_init() (inside nimbleBluetooth->setup()).
+            static bool classicBtReleased = false;
+            if (!classicBtReleased) {
+                esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+                classicBtReleased = true;
+            }
             nimbleBluetooth = new NimbleBluetooth();
         }
         if (enable && !nimbleBluetooth->isActive()) {
