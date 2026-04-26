@@ -14,9 +14,6 @@
 #define LORA_DIO1 36   // UEXT pin 4 (input-only GPIO)
 #define LORA_DIO2 13   // UEXT pin 6
 
-// User button
-#define BUTTON_PIN 34
-
 // No I2C (UEXT I2C lines occupied by LoRa SPI), no GPS, no screen, no battery ADC
 #define HAS_WIRE  0
 #define HAS_GPS   0
