@@ -339,6 +339,10 @@ bool connectPubSub(const PubSubConfig &config, PubSubClient &pubSub, Client &cli
 
 inline bool isConnectedToNetwork()
 {
+#if defined(USE_LAN8720)
+    return ETH.linkUp();
+#endif
+
 #ifdef USE_WS5500
     if (ETH.connected())
         return true;
@@ -346,7 +350,7 @@ inline bool isConnectedToNetwork()
 
 #if HAS_WIFI
     return WiFi.isConnected();
-#elif HAS_ETHERNET
+#elif HAS_ETHERNET && !defined(USE_LAN8720)
     return Ethernet.linkStatus() == LinkON;
 #else
     return false;

@@ -15,8 +15,12 @@
 #include <WiFiClientSecure.h>
 #endif
 #endif
-#if HAS_ETHERNET && !defined(USE_WS5500)
+#if HAS_ETHERNET && !defined(USE_WS5500) && !defined(USE_LAN8720)
 #include <EthernetClient.h>
+#endif
+#if defined(USE_LAN8720)
+#include <ETH.h>
+#include <WiFiClientSecure.h>
 #endif
 
 #if HAS_NETWORKING
@@ -86,6 +90,10 @@ class MQTT : private concurrency::OSThread
     using MQTTClientTLS = WiFiClientSecure;
 #define MQTT_SUPPORTS_TLS 1
 #endif
+#elif defined(USE_LAN8720)
+    using MQTTClient = WiFiClient;
+    using MQTTClientTLS = WiFiClientSecure;
+#define MQTT_SUPPORTS_TLS 1
 #elif HAS_ETHERNET
     using MQTTClient = EthernetClient;
 #else

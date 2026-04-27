@@ -9,7 +9,7 @@
 #include <RAK13800_W5100S.h>
 #include <SPI.h>
 
-#if HAS_NETWORKING
+#if HAS_NETWORKING && !defined(USE_LAN8720)
 
 #ifndef DISABLE_NTP
 #include <NTPClient.h>

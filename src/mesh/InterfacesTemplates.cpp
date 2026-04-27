@@ -25,13 +25,19 @@ template class LR11x0Interface<LR1121>;
 template class SX126xInterface<STM32WLx>;
 #endif
 
-#if HAS_ETHERNET && !defined(USE_WS5500)
+#if HAS_ETHERNET && !defined(USE_WS5500) && !defined(USE_LAN8720)
 #include "api/ethServerAPI.h"
 template class ServerAPI<EthernetClient>;
 template class APIServerPort<ethServerAPI, EthernetServer>;
 #endif
 
-#if HAS_WIFI
+#if defined(USE_LAN8720)
+#include "api/lan8720ServerAPI.h"
+template class ServerAPI<WiFiClient>;
+template class APIServerPort<lan8720ServerAPI, WiFiServer>;
+#endif
+
+#if HAS_WIFI && !defined(USE_LAN8720)
 #include "api/WiFiServerAPI.h"
 template class ServerAPI<WiFiClient>;
 template class APIServerPort<WiFiServerAPI, WiFiServer>;

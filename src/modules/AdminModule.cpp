@@ -234,7 +234,7 @@ bool AdminModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshta
         break;
     }
     case meshtastic_AdminMessage_ota_request_tag: {
-#if defined(ARCH_ESP32)
+#if defined(ARCH_ESP32) && !MESHTASTIC_EXCLUDE_WIFI
         LOG_INFO("OTA Requested");
 
         if (r->ota_request.ota_hash.size != 32) {
@@ -1268,7 +1268,7 @@ void AdminModule::handleGetDeviceConnectionStatus(const meshtastic_MeshPacket &r
     }
 #endif
 
-#if HAS_ETHERNET && !defined(USE_WS5500)
+#if HAS_ETHERNET && !defined(USE_WS5500) && !defined(USE_LAN8720)
     conn.has_ethernet = true;
     conn.ethernet.has_status = true;
     if (Ethernet.linkStatus() == LinkON) {
@@ -1278,6 +1278,20 @@ void AdminModule::handleGetDeviceConnectionStatus(const meshtastic_MeshPacket &r
         conn.ethernet.status.is_mqtt_connected = mqtt && mqtt->isConnectedDirectly();
 #endif
         conn.ethernet.status.is_syslog_connected = false; // FIXME wire this up
+    } else {
+        conn.ethernet.status.is_connected = false;
+    }
+#endif
+#if defined(USE_LAN8720)
+    conn.has_ethernet = true;
+    conn.ethernet.has_status = true;
+    if (ETH.linkUp()) {
+        conn.ethernet.status.is_connected = true;
+        conn.ethernet.status.ip_address = ETH.localIP();
+#if !MESHTASTIC_EXCLUDE_MQTT
+        conn.ethernet.status.is_mqtt_connected = mqtt && mqtt->isConnectedDirectly();
+#endif
+        conn.ethernet.status.is_syslog_connected = false;
     } else {
         conn.ethernet.status.is_connected = false;
     }
