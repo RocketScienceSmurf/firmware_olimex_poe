@@ -300,6 +300,13 @@ NodeDB::NodeDB()
     info->user = TypeConversions::ConvertToUserLite(owner);
     info->has_user = true;
 
+    // If a fixed position was saved, restore it into localPosition immediately so that
+    // MQTT map reports and other consumers have it available before the first broadcast fires.
+    if (config.position.fixed_position && info->has_position &&
+        (info->position.latitude_i != 0 || info->position.longitude_i != 0)) {
+        setLocalPosition(TypeConversions::ConvertToPosition(info->position));
+    }
+
     // If node database has not been saved for the first time, save it now
 #ifdef FSCom
     if (!FSCom.exists(nodeDatabaseFileName)) {

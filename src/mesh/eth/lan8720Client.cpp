@@ -34,7 +34,7 @@ static void onNTPSync(struct timeval *tv)
 
 static int32_t reconnectETH()
 {
-    if (!ethStartupComplete && ETH.linkUp()) {
+    if (!ethStartupComplete && ETH.linkUp() && (uint32_t)ETH.localIP() != 0) {
         LOG_INFO("LAN8720 link up, IP=%s", ETH.localIP().toString().c_str());
 
         // Use lwIP built-in SNTP — no extra library, zero heap overhead vs NTPClient
@@ -70,7 +70,9 @@ bool initEthernet()
              LAN8720_PHY_ADDR, LAN8720_PHY_MDC, LAN8720_PHY_MDIO);
 
     // ETH.begin() configures ESP32 EMAC + LAN8720 PHY via RMII.
-    // DHCP and link negotiation happen asynchronously; reconnectETH() polls link state.
+    // Both link negotiation and DHCP are asynchronous; reconnectETH() polls every 5 s and
+    // waits until linkUp() is true AND localIP() is non-zero (DHCP complete) before starting
+    // NTP, mDNS, and the API server, so those services are never started with IP 0.0.0.0.
     ETH.begin(LAN8720_PHY_ADDR, LAN8720_PHY_POWER, LAN8720_PHY_MDC, LAN8720_PHY_MDIO,
               ETH_PHY_LAN8720, LAN8720_CLK_MODE);
 
@@ -80,7 +82,7 @@ bool initEthernet()
 
 bool isEthernetAvailable()
 {
-    return config.network.eth_enabled && ETH.linkUp();
+    return config.network.eth_enabled && ETH.linkUp() && (uint32_t)ETH.localIP() != 0;
 }
 
 #endif // USE_LAN8720

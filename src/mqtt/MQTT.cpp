@@ -340,7 +340,9 @@ bool connectPubSub(const PubSubConfig &config, PubSubClient &pubSub, Client &cli
 inline bool isConnectedToNetwork()
 {
 #if defined(USE_LAN8720)
-    return ETH.linkUp();
+    // linkUp() goes true as soon as the physical link comes up, before DHCP completes.
+    // Require a non-zero IP so MQTT never attempts a connection with IP 0.0.0.0.
+    return ETH.linkUp() && (uint32_t)ETH.localIP() != 0;
 #endif
 
 #ifdef USE_WS5500
